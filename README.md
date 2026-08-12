@@ -13,7 +13,7 @@ reducer 重建。因此同一套事实同时服务于正常运行、恢复、离
 - [架构设计题答案](ARCHITECTURE_DESIGN.md)：Context、Memory、Task、Tool/Session Runtime、Runtime 协议对比五个模块。
 - [AI 辅助开发记录](AI_ASSISTED_DEVELOPMENT.md)：提示词、采纳/拒绝理由、真实问题与修复。
 - [演示流程稿](RECORDING_SCRIPT.md)：录屏中的完整操作路径与预期结果。
-- [演示视频与校验信息](DEMO_VIDEO.md)：视频作为 `v0.1.0` GitHub Release 附件发布。
+- [演示视频与校验信息](DEMO_VIDEO.md)：[GitHub Release v0.1.0](https://github.com/lcwsnb/glassbox-agent/releases/tag/v0.1.0)。
 - [示例 JSONL Trace](examples/trace.example.jsonl)：可公开审计的事件流示例。
 
 本地验收结果：`Doctor passed`、真实 DeepSeek eval `3/3 passed`、`39 tests passed`、分支覆盖率 `96.27%`。

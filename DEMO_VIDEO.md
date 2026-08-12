@@ -20,6 +20,6 @@
 | 文件大小 | 423,002,837 bytes（403.41 MiB） |
 | SHA-256 | `C92BD73D5675788F3735DCB26E687DAD66645B5F75B7271E443EF08901AFA917` |
 
-由于文件超过普通 Git 的 100 MiB 限制，视频不进入源码提交，而是作为 GitHub Release `v0.1.0` 的附件发布。Release 链接创建后会同步到本页和 README。
+由于文件超过普通 Git 的 100 MiB 限制，视频不进入源码提交，而是作为 [GitHub Release `v0.1.0`](https://github.com/lcwsnb/glassbox-agent/releases/tag/v0.1.0) 的附件发布。
 
 逐分钟演示流程见 [RECORDING_SCRIPT.md](RECORDING_SCRIPT.md)。

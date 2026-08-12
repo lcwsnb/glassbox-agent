@@ -18,7 +18,7 @@
 - [x] 本地 `.env` 已配置，且被 Git 忽略。
 - [x] 真实 `doctor` 与 3 个 live eval 已通过。
 - [x] 五个模块的架构设计答案已整理为仓库内 `ARCHITECTURE_DESIGN.md`。
-- [x] 本地 Git 初始 commit 已创建；尚待创建 GitHub remote 并推送。
+- [x] 公开 GitHub 仓库已创建，`main` 分支已推送。
 - [x] 演示视频已录制并完成画面、流程和密钥检查；尚待上传 GitHub Release。
 
 ## 1. 配置真实 DeepSeek API（USER）
@@ -145,7 +145,7 @@
 
 目标：形成一个可以直接发给面试官的提交包。
 
-- [ ] README 顶部补充 GitHub、录屏和架构设计链接。
+- [x] README 顶部已补充录屏 Release、架构设计和开发记录链接。
 - [x] `AI_ASSISTED_DEVELOPMENT.md` 包含真实问题和取舍。
 - [x] `ARCHITECTURE_DESIGN.md` 已进入仓库。
 - [x] `.env.example` 只有变量名和安全默认值。
