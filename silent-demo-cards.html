@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GlassBox Agent Silent Demo</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #07111f;
+      color: #eef6ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 18% 20%, rgba(29, 211, 176, 0.18), transparent 32%),
+        radial-gradient(circle at 82% 75%, rgba(81, 125, 255, 0.2), transparent 36%),
+        #07111f;
+    }
+    main { min-height: 100vh; }
+    .card {
+      display: none;
+      min-height: 100vh;
+      padding: 8vh 9vw;
+      align-items: center;
+      justify-content: center;
+    }
+    .card.active { display: flex; }
+    .content { width: min(1180px, 100%); }
+    .eyebrow {
+      color: #46e0bd;
+      font-size: clamp(18px, 2vw, 28px);
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    h1, h2 {
+      margin: 0 0 28px;
+      line-height: 1.12;
+      letter-spacing: -0.035em;
+    }
+    h1 { font-size: clamp(54px, 7.5vw, 112px); }
+    h2 { font-size: clamp(42px, 5.6vw, 80px); }
+    p {
+      margin: 0;
+      max-width: 1050px;
+      color: #bed0e6;
+      font-size: clamp(23px, 2.5vw, 38px);
+      line-height: 1.55;
+    }
+    .accent { color: #46e0bd; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-top: 38px;
+    }
+    .chip {
+      padding: 12px 18px;
+      border: 1px solid rgba(70, 224, 189, 0.45);
+      border-radius: 999px;
+      background: rgba(70, 224, 189, 0.08);
+      color: #dffbf5;
+      font-size: clamp(17px, 1.5vw, 24px);
+    }
+    .footer {
+      position: fixed;
+      left: 3vw;
+      right: 3vw;
+      bottom: 2.5vh;
+      display: flex;
+      justify-content: space-between;
+      color: #7087a2;
+      font-size: 16px;
+    }
+    .progress {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      height: 5px;
+      width: 0;
+      background: linear-gradient(90deg, #46e0bd, #517dff);
+      transition: width 180ms ease;
+    }
+    kbd {
+      border: 1px solid #496078;
+      border-bottom-width: 3px;
+      border-radius: 6px;
+      padding: 2px 7px;
+      color: #a8bed6;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card active">
+      <div class="content">
+        <div class="eyebrow">Agent Runtime · Live Demo</div>
+        <h1>GlassBox <span class="accent">Agent</span></h1>
+        <p>一个透明、可回放、可分叉的最小 Agent Runtime。<br>真实 DeepSeek API · 自研 Tool Loop · Append-only Event Store</p>
+        <div class="chips"><span class="chip">4 Tools</span><span class="chip">Session Isolation</span><span class="chip">Context Compaction</span><span class="chip">Offline Replay</span></div>
+      </div>
+    </section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">01 · Compatibility Probe</div>
+      <h2>先验证协议，再进入 Agent Loop</h2>
+      <p><span class="accent">doctor</span> 使用无副作用探针验证 API Key、模型名、Tool Calling、参数 JSON 与 tool_call_id。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">02 · Model Decision</div>
+      <h2>同一个 Runtime，支持直答与工具调用</h2>
+      <p>简单问题由模型直接回答；需要外部事实或动作时，模型自主选择工具。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">03 · Multi-tool Recovery</div>
+      <h2>故障不是黑盒异常，而是可见事件</h2>
+      <p>search_docs 首次返回可重试错误，模型收到结构化结果后自主恢复，并继续完成 read_doc → calculator → todo。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">04 · Flight Recorder</div>
+      <h2>每一步都进入事件账本</h2>
+      <p>Trace 展示参数、结果、错误、重试、耗时和事件顺序；Reducer 是唯一状态重建路径。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">05 · Context Compaction</div>
+      <h2>压缩活动 Context，不删除原始历史</h2>
+      <p>旧完整 Turn 进入结构化 Memory，Todo 由事件投影，最近轮次保留原文；失败时安全降级。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">06 · Session Isolation</div>
+      <h2>消息、Memory 与 Todo 不串扰</h2>
+      <p>Session A 和 Session B 写入独立事件流，随时切换并从各自历史继续运行。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">07 · Replay & Fork</div>
+      <h2>历史可离线重建，也可从完成 Turn 分叉</h2>
+      <p>Replay 不调用 LLM 或工具；Fork 继承分叉点之前的状态，之后父子独立演进。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">08 · Verification</div>
+      <h2>39 Tests · 96.27% Branch Coverage</h2>
+      <p>覆盖 Provider、Registry、Runtime、Session、Reducer、Fork、Compaction、Storage 与 Security。</p>
+    </div></section>
+
+    <section class="card"><div class="content">
+      <div class="eyebrow">GlassBox Agent</div>
+      <h2>小型 Runtime，完整执行语义</h2>
+      <p><span class="accent">Observable</span> · Recoverable · Replayable · Testable</p>
+    </div></section>
+  </main>
+
+  <div class="footer"><span>← → 切换 · F11 全屏</span><span id="counter">1 / 10</span></div>
+  <div class="progress" id="progress"></div>
+  <script>
+    const cards = [...document.querySelectorAll('.card')];
+    const counter = document.getElementById('counter');
+    const progress = document.getElementById('progress');
+    let index = 0;
+    function render() {
+      cards.forEach((card, i) => card.classList.toggle('active', i === index));
+      counter.textContent = `${index + 1} / ${cards.length}`;
+      progress.style.width = `${((index + 1) / cards.length) * 100}%`;
+    }
+    addEventListener('keydown', (event) => {
+      if (['ArrowRight', 'PageDown', ' ', 'Enter'].includes(event.key)) index = Math.min(cards.length - 1, index + 1);
+      if (['ArrowLeft', 'PageUp', 'Backspace'].includes(event.key)) index = Math.max(0, index - 1);
+      if (event.key === 'Home') index = 0;
+      if (event.key === 'End') index = cards.length - 1;
+      render();
+    });
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+.venv/
+.glassbox/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.env
+*.db
+*.db-shm
+*.db-wal
+trace-*.jsonl
+*.mp4
