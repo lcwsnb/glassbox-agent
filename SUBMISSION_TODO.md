@@ -18,7 +18,7 @@
 - [x] 本地 `.env` 已配置，且被 Git 忽略。
 - [x] 真实 `doctor` 与 3 个 live eval 已通过。
 - [x] 五个模块的架构设计答案已整理为仓库内 `ARCHITECTURE_DESIGN.md`。
-- [ ] Git 仓库尚无 remote，也尚未提交初始 commit。
+- [x] 本地 Git 初始 commit 已创建；尚待创建 GitHub remote 并推送。
 - [x] 演示视频已录制并完成画面、流程和密钥检查；尚待上传 GitHub Release。
 
 ## 1. 配置真实 DeepSeek API（USER）
