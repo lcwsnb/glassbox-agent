@@ -22,4 +22,6 @@
 
 由于文件超过普通 Git 的 100 MiB 限制，视频不进入源码提交，而是作为 [GitHub Release `v0.1.0`](https://github.com/lcwsnb/glassbox-agent/releases/tag/v0.1.0) 的附件发布。
 
+直接下载：[glassbox-agent-demo.mp4](https://github.com/lcwsnb/glassbox-agent/releases/download/v0.1.0/glassbox-agent-demo.mp4)
+
 逐分钟演示流程见 [RECORDING_SCRIPT.md](RECORDING_SCRIPT.md)。
