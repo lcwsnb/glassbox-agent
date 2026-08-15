@@ -24,6 +24,7 @@
 4. “DeepSeek 的 timeout、429、5xx 与 4xx 应如何分类重试？”
 5. “如何证明 replay 完全离线、两 session 无串扰、API key 和 reasoning 不落盘？”
 6. “当前 DeepSeek V4 的模型名、tool call 协议和 thinking 默认值是什么？”
+7. “如何把进程级工具注册和 Turn 级工具暴露分离，并避免共享可变工具列表造成串扰？”
 
 ## 2. 采纳的建议
 
@@ -37,6 +38,8 @@
 | 重试是 runtime 事件 | 录屏可以解释故障与恢复，而不是只看到最终结果 | `retry_scheduled` |
 | 用事实约束 live eval | 模型措辞不稳定，不应逐字匹配 | 工具集合、关键事实、todo、pending errors |
 | 非思考模式显式开关 | V4 默认 thinking；工具循环需额外回传 reasoning | `thinking.type=disabled` |
+| Turn 只绑定 ToolRef | 工具实现全局复用，同时让每轮 Schema 和执行权限相互隔离 | `TurnToolView` + `tools_bound` |
+| 确定性规则路由 | 当前只有 4 个工具，不值得为工具搜索增加一次 LLM 往返 | namespace/tags + 可替换 binding policy |
 
 ## 3. 拒绝或调整的建议
 
@@ -98,6 +101,20 @@
 - 现象：早期 trace 只显示 event type，故障演示难以讲清恢复过程。
 - 修复：增加工具参数、ok/error code、耗时、LLM step、usage、retry number 与 context 字符估算。
 
+### 全量工具 Schema 与共享暴露范围
+
+- 现象：每个模型 step 都调用无参数 `registry.schemas()`，因此所有工具始终暴露；Runtime 也只验证
+  工具是否全局注册，没有验证它是否属于当前 Turn。
+- 风险：工具规模扩大后 Schema token 持续增长；未来接入用户权限或动态工具时，容易出现跨 Turn
+  能力泄漏和共享 List 污染。
+- 修复：Registry 在 Runtime 初始化后冻结；每个 Turn 通过确定性 policy 创建不可变
+  `TurnToolView`，只保存指向全局 ToolSpec 的名称引用。Provider 接收由该视图投影出的 Schema 子集，
+  Executor 再使用同一视图执行 `TOOL_NOT_BOUND` 校验。
+- 取舍：没有为当前四工具引入 `search_tools`；以后可以新增 deferred binding policy，而无需修改
+  Registry、reducer 或执行器。
+- 验证：覆盖空工具直答、namespace 路由、显式绑定、权限求交、同 Turn Schema 稳定、Session/Fork
+  隔离、离线 replay 和全量回退模式。
+
 ## 5. AI 输出如何被验证
 
 AI 建议不直接作为“正确性证明”，所有关键承诺都映射到自动化测试或可观察命令：
@@ -109,7 +126,7 @@ AI 建议不直接作为“正确性证明”，所有关键承诺都映射到�
 - 压缩：成功 capsule、失败滑窗、完整 turn 边界。
 - 安全：AST calculator 拒绝调用/属性访问；API key 和 reasoning 不出现在 JSONL。
 - 真实 API：`glassbox doctor` 通过，三个 DeepSeek live eval 全部通过。
-- 质量：Ruff 通过，39 个测试通过，分支覆盖率 96.27%。
+- 质量：Ruff 通过，50 个测试通过，总覆盖率 97%。
 
 ## 6. 提交验证
 

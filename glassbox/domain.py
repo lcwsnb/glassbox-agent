@@ -19,6 +19,7 @@ def utc_now() -> datetime:
 
 class EventType(StrEnum):
     USER_MESSAGE = "user_message"
+    TOOLS_BOUND = "tools_bound"
     LLM_REQUESTED = "llm_requested"
     LLM_RESPONDED = "llm_responded"
     TOOL_REQUESTED = "tool_requested"
@@ -58,6 +59,31 @@ class ToolResult(BaseModel):
     error_code: str | None = None
     retryable: bool = False
     duration_ms: int = 0
+
+
+class ToolRef(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    schema_hash: str
+
+
+class TurnToolView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    turn_id: str
+    refs: tuple[ToolRef, ...] = ()
+    strategy: Literal["all", "routed", "explicit"]
+    catalog_hash: str
+    schema_hash: str
+    policy_version: str = "v1"
+    namespaces: tuple[str, ...] = ()
+    reasons: dict[str, list[str]] = Field(default_factory=dict)
+    full_catalog_count: int = 0
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(ref.name for ref in self.refs)
 
 
 class ModelDecision(BaseModel):
@@ -103,6 +129,7 @@ class RuntimeState(BaseModel):
     todos: dict[str, TodoItem] = Field(default_factory=dict)
     memory: MemoryCapsule = Field(default_factory=MemoryCapsule)
     pending_tool_calls: dict[str, ToolCall] = Field(default_factory=dict)
+    tool_views: dict[str, TurnToolView] = Field(default_factory=dict)
     last_assistant_message: str | None = None
     last_completed_turn: str | None = None
     status: Literal["idle", "running", "completed", "stopped", "failed"] = "idle"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 
 from glassbox.domain import MemoryCapsule, ModelDecision
@@ -23,6 +24,7 @@ class ScriptedProvider:
         self.complete_calls = 0
         self.summarize_calls = 0
         self.seen_messages: list[list[dict]] = []
+        self.seen_tools: list[list[dict]] = []
 
     def complete(
         self,
@@ -31,7 +33,8 @@ class ScriptedProvider:
         on_retry: Callable | None = None,
     ) -> ModelDecision:
         self.complete_calls += 1
-        self.seen_messages.append(messages)
+        self.seen_messages.append(copy.deepcopy(messages))
+        self.seen_tools.append(copy.deepcopy(_tools))
         if self.retry_error is not None and on_retry is not None:
             on_retry(1, self.retry_error)
             self.retry_error = None

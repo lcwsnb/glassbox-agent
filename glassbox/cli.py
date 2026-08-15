@@ -62,6 +62,13 @@ def _print_trace(runtime: AgentRuntime, session_id: str) -> None:
         summary = ""
         if event.event_type is EventType.USER_MESSAGE:
             summary = payload.get("content", "")
+        elif event.event_type is EventType.TOOLS_BOUND:
+            tools = payload.get("tool_names") or []
+            summary = (
+                f"strategy={payload.get('strategy')} "
+                f"tools={tools or 'none'} "
+                f"catalog={payload.get('full_catalog_count')} bound={len(tools)}"
+            )
         elif event.event_type is EventType.TOOL_REQUESTED:
             call = payload.get("call", {})
             summary = f"{call.get('name')} {json.dumps(call.get('arguments'), ensure_ascii=False)}"
@@ -72,7 +79,11 @@ def _print_trace(runtime: AgentRuntime, session_id: str) -> None:
                 f"{payload.get('content', '')}"
             )
         elif event.event_type is EventType.LLM_REQUESTED:
-            summary = f"step={payload.get('step')} chars≈{payload.get('estimated_chars')}"
+            summary = (
+                f"step={payload.get('step')} chars≈{payload.get('estimated_chars')} "
+                f"tools={payload.get('tool_names') or 'none'} "
+                f"schema_chars={payload.get('schema_chars', 0)}"
+            )
         elif event.event_type is EventType.LLM_RESPONDED:
             calls = [call.get("name") for call in payload.get("tool_calls", [])]
             summary = (

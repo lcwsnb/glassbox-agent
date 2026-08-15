@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import operator
 import os
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
@@ -37,6 +38,8 @@ class ToolSpec:
     description: str
     args_model: type[BaseModel]
     handler: ToolHandler
+    namespace: str = "default"
+    tags: tuple[str, ...] = ()
     timeout_seconds: float = 5.0
     max_output_chars: int = 8_000
 
@@ -45,15 +48,37 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolSpec] = {}
         self._demo_failures: set[str] = set()
+        self._frozen = False
 
     def register(self, spec: ToolSpec) -> None:
+        if self._frozen:
+            raise RuntimeError("Tool registry is frozen")
         if spec.name in self._tools:
             raise ValueError(f"Tool '{spec.name}' is already registered")
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", spec.name):
             raise ValueError(f"Invalid tool name: {spec.name!r}")
         self._tools[spec.name] = spec
 
-    def schemas(self) -> list[dict[str, Any]]:
+    def freeze(self) -> None:
+        self._frozen = True
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._tools)
+
+    def specs(self) -> tuple[ToolSpec, ...]:
+        return tuple(self._tools.values())
+
+    def get(self, name: str) -> ToolSpec:
+        try:
+            return self._tools[name]
+        except KeyError as exc:
+            raise KeyError(f"Unknown tool: {name}") from exc
+
+    def schemas(self, names: Collection[str] | None = None) -> list[dict[str, Any]]:
+        selected_names = self.names() if names is None else tuple(dict.fromkeys(names))
+        unknown = set(selected_names) - set(self._tools)
+        if unknown:
+            raise KeyError(f"Unknown tools: {', '.join(sorted(unknown))}")
         return [
             {
                 "type": "function",
@@ -63,14 +88,37 @@ class ToolRegistry:
                     "parameters": spec.args_model.model_json_schema(),
                 },
             }
-            for spec in self._tools.values()
+            for name in selected_names
+            for spec in (self._tools[name],)
         ]
 
-    def execute(self, call: ToolCall, state: RuntimeState) -> ToolResult:
+    def schema_hash(self, names: Collection[str]) -> str:
+        encoded = json.dumps(
+            self.schemas(names), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]
+
+    def catalog_hash(self) -> str:
+        return self.schema_hash(self.names())
+
+    def execute(
+        self,
+        call: ToolCall,
+        state: RuntimeState,
+        *,
+        allowed_names: Collection[str],
+    ) -> ToolResult:
         started = time.perf_counter()
         spec = self._tools.get(call.name)
         if spec is None:
             return self._failure(call, started, "UNKNOWN_TOOL", f"Unknown tool: {call.name}")
+        if call.name not in allowed_names:
+            return self._failure(
+                call,
+                started,
+                "TOOL_NOT_BOUND",
+                f"Tool '{call.name}' is not available in the current turn",
+            )
         if call.parse_error:
             return self._failure(
                 call,
@@ -318,6 +366,8 @@ def build_default_registry() -> ToolRegistry:
             description="Safely evaluate basic arithmetic. Use it instead of mental arithmetic.",
             args_model=CalculatorArgs,
             handler=calculator,
+            namespace="math",
+            tags=("计算", "金额", "总计", "合计", "多少", "算一下", "算", "calculate", "total"),
         )
     )
     registry.register(
@@ -329,6 +379,21 @@ def build_default_registry() -> ToolRegistry:
             ),
             args_model=SearchDocsArgs,
             handler=search_docs,
+            namespace="docs",
+            tags=(
+                "差旅",
+                "政策",
+                "报销",
+                "文档",
+                "搜索",
+                "查阅",
+                "餐补",
+                "周报",
+                "模板",
+                "policy",
+                "document",
+                "search",
+            ),
         )
     )
     registry.register(
@@ -337,6 +402,8 @@ def build_default_registry() -> ToolRegistry:
             description="Read one bundled document by the doc_id returned by search_docs.",
             args_model=ReadDocArgs,
             handler=read_doc,
+            namespace="docs",
+            tags=("阅读", "详情", "文档", "政策", "read"),
         )
     )
     registry.register(
@@ -345,6 +412,8 @@ def build_default_registry() -> ToolRegistry:
             description="Add, list, or complete session-local todo items.",
             args_model=TodoArgs,
             handler=todo,
+            namespace="productivity",
+            tags=("待办", "任务", "提醒", "完成", "记下", "记录", "todo"),
         )
     )
     return registry

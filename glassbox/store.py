@@ -18,6 +18,7 @@ from .domain import (
     Session,
     TodoItem,
     ToolCall,
+    TurnToolView,
     utc_now,
 )
 
@@ -302,6 +303,8 @@ def reduce_events(events: Iterable[RuntimeEvent]) -> RuntimeState:
                 state.messages.append({"role": "user", "content": payload["content"]})
                 state.user_turns += 1
                 state.status = "running"
+            case EventType.TOOLS_BOUND:
+                state.tool_views[event.turn_id] = TurnToolView.model_validate(payload)
             case EventType.LLM_RESPONDED:
                 state.messages.append(_assistant_message(payload))
                 for call_data in payload.get("tool_calls") or []:

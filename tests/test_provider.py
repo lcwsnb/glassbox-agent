@@ -57,10 +57,16 @@ def test_parse_direct_and_tool_decisions() -> None:
     assert model.client.chat.completions.kwargs[0]["extra_body"] == {
         "thinking": {"type": "disabled"}
     }
-    tools = provider([response(tool_calls=[tool_call()])]).complete([], [])
+    assert "tools" not in model.client.chat.completions.kwargs[0]
+    assert "tool_choice" not in model.client.chat.completions.kwargs[0]
+    schema = [{"type": "function", "function": {"name": "calculator"}}]
+    tool_model = provider([response(tool_calls=[tool_call()])])
+    tools = tool_model.complete([], schema)
     assert tools.kind == "tool_calls"
     assert tools.tool_calls[0].arguments == {"expression": "2+2"}
     assert tools.usage["prompt_tokens"] == 3
+    assert tool_model.client.chat.completions.kwargs[0]["tools"] == schema
+    assert tool_model.client.chat.completions.kwargs[0]["tool_choice"] == "auto"
 
 
 def test_invalid_tool_json_is_preserved_as_parse_error() -> None:

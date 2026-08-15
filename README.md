@@ -16,7 +16,8 @@ reducer 重建。因此同一套事实同时服务于正常运行、恢复、离
 - [演示视频与校验信息](DEMO_VIDEO.md)：[GitHub Release v0.1.0](https://github.com/lcwsnb/glassbox-agent/releases/tag/v0.1.0)，或[直接下载 MP4](https://github.com/lcwsnb/glassbox-agent/releases/download/v0.1.0/glassbox-agent-demo.mp4)。
 - [示例 JSONL Trace](examples/trace.example.jsonl)：可公开审计的事件流示例。
 
-本地验收结果：`Doctor passed`、真实 DeepSeek eval `3/3 passed`、`39 tests passed`、分支覆盖率 `96.27%`。
+最近一次真实 API 验收结果：`Doctor passed`、DeepSeek eval `3/3 passed`。本次 Turn 工具绑定改造的
+离线验收结果为 `50 tests passed`、总覆盖率 `97%`；真实 API eval 需要显式执行，不进入默认测试。
 
 > 安全边界：项目不会显示或持久化原始思维链。公开账本只保存模型公开文本、结构化工具决策、
 > 工具结果和 token usage；`reasoning_content` 即使由兼容端点返回，也只存在于当前 Python
@@ -108,7 +109,9 @@ Remove-Item Env:GLASSBOX_FAIL_ONCE_TOOL
 flowchart LR
     U["Rich CLI"] --> R["AgentRuntime"]
     R --> P["DeepSeekProvider"]
-    R --> T["ToolRegistry"]
+    R --> B["Turn Binding Policy"]
+    B --> V["Immutable TurnToolView"]
+    V --> T["Frozen ToolRegistry"]
     T --> C["calculator"]
     T --> S["search_docs / read_doc"]
     T --> D["todo"]
@@ -122,6 +125,7 @@ flowchart LR
 | 模块 | 职责 |
 |---|---|
 | `domain.py` | Pydantic 领域类型、事件类型、决策、状态与 outcome |
+| `binding.py` | Turn 级工具路由、ToolRef 软绑定与权限集合求交 |
 | `provider.py` | DeepSeek 请求、响应解析、重试分类、摘要与 doctor |
 | `tools.py` | 注册机制、JSON Schema、校验、超时、截断和 4 个工具 |
 | `store.py` | SQLite 事件账本、session 祖先加载、JSONL 导出、纯 reducer |
@@ -154,9 +158,10 @@ sequenceDiagram
     participant Tool
     User->>Runtime: user input
     Runtime->>Store: append user_message
+    Runtime->>Store: append tools_bound
     loop 最多 8 个 model steps
         Runtime->>Store: reduce all visible history
-        Runtime->>Model: messages + tool schemas
+        Runtime->>Model: messages + 本 Turn schema 子集
         Model-->>Runtime: final 或 tool_calls
         Runtime->>Store: append llm_responded
         alt final
@@ -176,6 +181,22 @@ sequenceDiagram
 执行，原始 `tool_call_id` 会贯穿 assistant tool call、事件和 tool result。API timeout、连接
 错误、429 与 5xx 最多重试 2 次；认证、参数和其他 4xx 不重试。工具错误作为结构化结果回灌
 模型，由模型决定如何恢复。
+
+## Turn 级工具软绑定
+
+`ToolRegistry` 在 Runtime 初始化后冻结并保存完整 `ToolSpec`；每个 Turn 只持有不可变的
+`TurnToolView`，其中的 `ToolRef` 按名称指向全局工具，而不复制 handler 或参数模型。默认
+`RuleBasedTurnBindingPolicy` 根据当前输入选择 `docs`、`math`、`productivity` namespace，再与
+调用方传入的 `allowed_tools` 求交。显式 `requested_tools` 可以覆盖规则路由，但不能绕过权限集合。
+
+同一 Turn 的所有模型 step 使用同一个 schema 子集；新 Turn 重新绑定。执行器还会校验模型调用的
+工具是否属于当前视图，已注册但未绑定的调用返回 `TOOL_NOT_BOUND`。`tools_bound`、工具名、schema
+字符数、`schema_hash` 和包含 messages+schemas 的 `request_hash` 都进入事件账本，因此 replay 能
+恢复历史绑定，而不会重新运行路由。
+
+默认模式为 `turn`；`all` 是兼容回退。普通对话可以绑定空工具集，此时 Provider 不发送 `tools`
+或 `tool_choice`。当前仅有 4 个工具，因此没有引入会增加模型往返的 Tool Search；未来可通过新的
+`ToolBindingPolicy` 增加 deferred discovery，而无需改变 Registry、Executor 或 reducer。
 
 如果进程在 `tool_requested` 后退出，下次运行会写入 `run_stopped(reason=interrupted_tool_call)`，
 清除悬挂状态但不重新执行工具，避免重复副作用。
@@ -294,7 +315,7 @@ ruff format --check .
 pytest --cov=glassbox --cov-branch --cov-report=term-missing --cov-fail-under=90
 ```
 
-当前本地结果：39 tests passed，分支覆盖率 96.27%。测试覆盖 provider 解析与重试、registry、
+当前本地结果：50 tests passed，总覆盖率 97%。测试覆盖 provider 解析与重试、registry、
 四个工具、runtime 多步链、错误恢复、限制、两 session 隔离、纯 replay、fork、压缩成功/失败、
 中断恢复、JSONL、calculator 安全，以及 API key/思维链不落盘。
 
@@ -323,6 +344,7 @@ GitHub Actions 在 Windows 与 Ubuntu 的 Python 3.12 上执行 Ruff、pytest �
 | `GLASSBOX_RECENT_TURNS` | `4` | 压缩后保留的完整 turn 数 |
 | `GLASSBOX_MAX_STEPS` | `8` | 单次用户请求的模型 step 上限 |
 | `GLASSBOX_MAX_SESSION_TURNS` | `50` | session 用户 turn 上限 |
+| `GLASSBOX_TOOL_BINDING_MODE` | `turn` | `turn` 按轮绑定；`all` 全量兼容模式 |
 | `GLASSBOX_FAIL_ONCE_TOOL` | 空 | 仅演示：指定工具第一次返回瞬时错误 |
 
 ## 公开接口
@@ -334,8 +356,14 @@ class LLMProvider(Protocol):
 
 class ToolRegistry:
     def register(self, spec: ToolSpec) -> None: ...
-    def schemas(self) -> list[dict]: ...
-    def execute(self, call: ToolCall, state: RuntimeState) -> ToolResult: ...
+    def freeze(self) -> None: ...
+    def schemas(self, names=None) -> list[dict]: ...
+    def execute(self, call, state, *, allowed_names) -> ToolResult: ...
+
+
+class ToolBindingPolicy(Protocol):
+    def bind(self, *, turn_id, user_input, state, registry,
+             mode, allowed_names, requested_names) -> TurnToolView: ...
 
 
 class EventStore:
@@ -349,7 +377,8 @@ def reduce_events(events: list[RuntimeEvent]) -> RuntimeState: ...
 
 
 class AgentRuntime:
-    def run(self, session_id: str, user_input: str) -> RunOutcome: ...
+    def run(self, session_id, user_input, *,
+            requested_tools=None, allowed_tools=None) -> RunOutcome: ...
 ```
 
 ## 已知边界
@@ -361,6 +390,7 @@ class AgentRuntime:
 - SQLite append 的 session 内并发写入没有做高吞吐优化；CLI 假定同一 session 单 writer。
 - Memory capsule 是有损摘要，事实可靠性取决于模型；原始事件永久保留，可用于审计与重新压缩。
 - Fork 只继承历史事实，不复制未来事件，也不重新执行模型或工具。
+- v1 的默认工具路由是可测试的关键词/算式规则，不进行语义向量召回；工具规模扩大后可替换绑定策略。
 
 ## 项目结构
 
@@ -368,6 +398,7 @@ class AgentRuntime:
 glassbox-agent/
 ├── glassbox/
 │   ├── cli.py
+│   ├── binding.py
 │   ├── domain.py
 │   ├── provider.py
 │   ├── runtime.py

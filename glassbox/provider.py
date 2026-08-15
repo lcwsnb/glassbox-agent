@@ -112,15 +112,16 @@ class DeepSeekProvider:
         tools: list[dict[str, Any]],
         on_retry: Callable[[int, Exception], None] | None = None,
     ) -> ModelDecision:
-        response = self._request(
-            on_retry=on_retry,
-            model=self.model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=0,
-            extra_body={"thinking": {"type": "disabled"}},
-        )
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0,
+            "extra_body": {"thinking": {"type": "disabled"}},
+        }
+        if tools:
+            request["tools"] = tools
+            request["tool_choice"] = "auto"
+        response = self._request(on_retry=on_retry, **request)
         choices = _attribute(response, "choices", [])
         if not choices:
             raise ProviderError("DeepSeek returned no choices. Retry or choose another model.")

@@ -6,10 +6,12 @@ import hashlib
 import json
 import os
 import uuid
-from typing import Any
+from collections.abc import Collection
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from .binding import RuleBasedTurnBindingPolicy, ToolBindingPolicy
 from .domain import (
     ContextSnapshot,
     EventType,
@@ -22,12 +24,11 @@ from .store import EventStore, event_messages, reduce_events
 from .tools import ToolRegistry
 
 SYSTEM_PROMPT = """You are GlassBox Agent, a concise assistant running in a transparent runtime.
-Use tools whenever a request needs arithmetic, bundled company facts, document contents, or todo
-state. search_docs is a clearly labeled local mock search, not the internet. After search_docs,
-call read_doc before relying on a policy detail. Use calculator for arithmetic. If a tool returns
-a retryable error, retry it at most once; otherwise explain the failure and recover safely. Never
-invent tool results. Do not reveal or request private chain-of-thought. Your visible text should
-contain only useful conclusions or a short action summary.
+Use only the tools exposed in the current request. Never invent unavailable tools or tool results.
+If no appropriate tool is available, answer with the available information or explain the
+limitation. If a tool returns a retryable error, retry it at most once; otherwise explain the
+failure and recover safely. Do not reveal or request private chain-of-thought. Your visible text
+should contain only useful conclusions or a short action summary.
 """
 
 
@@ -36,6 +37,7 @@ class RuntimeConfig(BaseModel):
     recent_turns: int = Field(default=4, ge=1)
     max_steps: int = Field(default=8, ge=1)
     max_session_turns: int = Field(default=50, ge=1)
+    tool_binding_mode: Literal["all", "turn"] = "turn"
 
     @classmethod
     def from_env(cls) -> RuntimeConfig:
@@ -44,6 +46,7 @@ class RuntimeConfig(BaseModel):
             recent_turns=int(os.getenv("GLASSBOX_RECENT_TURNS", "4")),
             max_steps=int(os.getenv("GLASSBOX_MAX_STEPS", "8")),
             max_session_turns=int(os.getenv("GLASSBOX_MAX_SESSION_TURNS", "50")),
+            tool_binding_mode=os.getenv("GLASSBOX_TOOL_BINDING_MODE", "turn"),
         )
 
 
@@ -54,11 +57,14 @@ class AgentRuntime:
         provider: LLMProvider,
         registry: ToolRegistry,
         config: RuntimeConfig | None = None,
+        binding_policy: ToolBindingPolicy | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
         self.registry = registry
         self.config = config or RuntimeConfig.from_env()
+        self.binding_policy = binding_policy or RuleBasedTurnBindingPolicy()
+        self.registry.freeze()
 
     def _append(
         self,
@@ -100,7 +106,14 @@ class AgentRuntime:
                 },
             )
 
-    def run(self, session_id: str, user_input: str) -> RunOutcome:
+    def run(
+        self,
+        session_id: str,
+        user_input: str,
+        *,
+        requested_tools: Collection[str] | None = None,
+        allowed_tools: Collection[str] | None = None,
+    ) -> RunOutcome:
         self.store.get_session(session_id)
         if not user_input.strip():
             raise ValueError("User input cannot be empty")
@@ -113,13 +126,37 @@ class AgentRuntime:
             )
 
         turn_id = uuid.uuid4().hex[:12]
+        tool_view = self.binding_policy.bind(
+            turn_id=turn_id,
+            user_input=user_input.strip(),
+            state=state,
+            registry=self.registry,
+            mode=self.config.tool_binding_mode,
+            requested_names=requested_tools,
+            allowed_names=allowed_tools,
+        )
         self._append(session_id, turn_id, EventType.USER_MESSAGE, {"content": user_input.strip()})
+        tool_payload = tool_view.model_dump(mode="json")
+        tool_payload["tool_names"] = list(tool_view.names)
+        tool_payload["bound_tool_count"] = len(tool_view.names)
+        self._append(session_id, turn_id, EventType.TOOLS_BOUND, tool_payload)
+        schemas = self.registry.schemas(tool_view.names)
+        schema_chars = len(json.dumps(schemas, ensure_ascii=False))
         self._maybe_compact(session_id, turn_id)
 
         for step in range(1, self.config.max_steps + 1):
             snapshot = self.context_snapshot(session_id)
-            context_hash = hashlib.sha256(
-                json.dumps(snapshot.messages, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            messages_json = json.dumps(
+                snapshot.messages, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            context_hash = hashlib.sha256(messages_json.encode("utf-8")).hexdigest()[:16]
+            request_hash = hashlib.sha256(
+                json.dumps(
+                    {"messages": snapshot.messages, "tools": schemas},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
             ).hexdigest()[:16]
             self._append(
                 session_id,
@@ -130,7 +167,11 @@ class AgentRuntime:
                     "step": step,
                     "estimated_chars": snapshot.estimated_chars,
                     "context_hash": context_hash,
-                    "tool_count": len(self.registry.schemas()),
+                    "request_hash": request_hash,
+                    "tool_names": list(tool_view.names),
+                    "tool_count": len(tool_view.names),
+                    "schema_chars": schema_chars,
+                    "schema_hash": tool_view.schema_hash,
                 },
             )
 
@@ -154,7 +195,7 @@ class AgentRuntime:
 
             try:
                 decision = self.provider.complete(
-                    snapshot.messages, self.registry.schemas(), on_retry=on_retry
+                    snapshot.messages, schemas, on_retry=on_retry
                 )
             except ProviderError as exc:
                 answer = str(exc)
@@ -211,7 +252,11 @@ class AgentRuntime:
                     EventType.TOOL_REQUESTED,
                     {"step": step, "call": call.model_dump(exclude_none=True)},
                 )
-                result = self.registry.execute(call, self.replay(session_id))
+                result = self.registry.execute(
+                    call,
+                    self.replay(session_id),
+                    allowed_names=tool_view.names,
+                )
                 event_type = EventType.TOOL_SUCCEEDED if result.ok else EventType.TOOL_FAILED
                 self._append(
                     session_id,

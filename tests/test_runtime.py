@@ -31,7 +31,10 @@ def test_direct_answer_and_offline_replay(tmp_path) -> None:
     replayed = agent.replay(session.id)
     assert replayed == outcome.state
     assert provider.complete_calls == before
+    assert provider.seen_tools == [[]]
     assert agent.context_snapshot(session.id).messages[-1]["content"] == "hello"
+    view = next(iter(outcome.state.tool_views.values()))
+    assert view.strategy == "routed" and not view.names
 
 
 def test_reasoning_and_api_key_never_enter_event_ledger(tmp_path) -> None:
@@ -74,14 +77,28 @@ def test_multi_step_tool_chain_and_todo_projection(tmp_path) -> None:
         ),
         ModelDecision(kind="final", content="餐补共360元，待办已添加。"),
     ]
-    agent = runtime(tmp_path, ScriptedProvider(decisions))
+    provider = ScriptedProvider(decisions)
+    agent = runtime(tmp_path, provider)
     session = agent.store.create_session()
-    outcome = agent.run(session.id, "安排报销")
+    outcome = agent.run(
+        session.id,
+        "查阅上海差旅政策，计算三天餐补金额并添加待办",
+    )
     assert outcome.steps == 5
     assert "360" in outcome.answer
     assert next(iter(outcome.state.todos.values())).title == "周五提交报销"
     event_types = [event.event_type for event in agent.trace(session.id)]
     assert event_types.count(EventType.TOOL_SUCCEEDED) == 4
+    expected = {"search_docs", "read_doc", "calculator", "todo"}
+    assert all(
+        {schema["function"]["name"] for schema in tools} == expected
+        for tools in provider.seen_tools
+    )
+    requested = [
+        event for event in agent.trace(session.id) if event.event_type is EventType.LLM_REQUESTED
+    ]
+    assert len({event.payload["schema_hash"] for event in requested}) == 1
+    assert all(event.payload["request_hash"] for event in requested)
 
 
 def test_tool_failure_is_returned_to_model_then_recovered(tmp_path) -> None:
@@ -114,7 +131,7 @@ def test_max_steps_and_session_turn_limit(tmp_path) -> None:
     ]
     agent = runtime(tmp_path, ScriptedProvider(decisions), max_steps=2, max_session_turns=1)
     session = agent.store.create_session()
-    outcome = agent.run(session.id, "loop")
+    outcome = agent.run(session.id, "loop", requested_tools={"calculator"})
     assert outcome.status == "stopped"
     assert "2 model steps" in outcome.answer
     with pytest.raises(RuntimeError, match="turn limit"):
@@ -272,11 +289,89 @@ def test_independent_sessions_isolate_messages_and_todos(tmp_path) -> None:
     agent = runtime(tmp_path, provider)
     session_a = agent.store.create_session("A")
     session_b = agent.store.create_session("B")
-    agent.run(session_a.id, "make A")
-    agent.run(session_b.id, "make B")
+    agent.run(session_a.id, "make A todo", requested_tools={"todo"})
+    agent.run(session_b.id, "make B todo", requested_tools={"todo"})
     state_a = agent.replay(session_a.id)
     state_b = agent.replay(session_b.id)
     assert {item.title for item in state_a.todos.values()} == {"A only"}
     assert {item.title for item in state_b.todos.values()} == {"B only"}
     assert "make B" not in json.dumps(state_a.messages)
     assert "make A" not in json.dumps(state_b.messages)
+    assert set(state_a.tool_views) != set(state_b.tool_views)
+
+
+def test_turn_routes_tool_subsets_and_all_mode_fallback(tmp_path) -> None:
+    provider = ScriptedProvider(
+        [
+            ModelDecision(kind="final", content="docs"),
+            ModelDecision(kind="final", content="todo"),
+            ModelDecision(kind="final", content="all"),
+        ]
+    )
+    agent = runtime(tmp_path, provider)
+    session = agent.store.create_session()
+    agent.run(session.id, "查阅差旅政策")
+    agent.run(session.id, "添加一个待办")
+    assert [
+        {schema["function"]["name"] for schema in tools} for tools in provider.seen_tools[:2]
+    ] == [{"search_docs", "read_doc"}, {"todo"}]
+
+    all_provider = ScriptedProvider([ModelDecision(kind="final", content="all")])
+    all_agent = runtime(tmp_path, all_provider, tool_binding_mode="all")
+    all_session = all_agent.store.create_session()
+    all_agent.run(all_session.id, "hello")
+    assert {schema["function"]["name"] for schema in all_provider.seen_tools[0]} == {
+        "search_docs",
+        "read_doc",
+        "calculator",
+        "todo",
+    }
+
+
+def test_explicit_binding_permission_filter_and_execution_guard(tmp_path) -> None:
+    provider = ScriptedProvider(
+        [
+            ModelDecision(
+                kind="tool_calls",
+                tool_calls=[ToolCall(id="denied", name="todo", arguments={"action": "list"})],
+            ),
+            ModelDecision(kind="final", content="denied safely"),
+        ]
+    )
+    agent = runtime(tmp_path, provider)
+    session = agent.store.create_session()
+    outcome = agent.run(
+        session.id,
+        "计算并查看待办",
+        requested_tools={"calculator", "todo"},
+        allowed_tools={"calculator"},
+    )
+    assert {schema["function"]["name"] for schema in provider.seen_tools[0]} == {"calculator"}
+    failed = [
+        event for event in agent.trace(session.id) if event.event_type is EventType.TOOL_FAILED
+    ]
+    assert failed[0].payload["error_code"] == "TOOL_NOT_BOUND"
+    view = outcome.state.tool_views[outcome.turn_id]
+    assert view.strategy == "explicit" and view.names == ("calculator",)
+
+
+def test_fork_inherits_historical_tool_view_but_new_turn_rebinds(tmp_path) -> None:
+    provider = ScriptedProvider(
+        [
+            ModelDecision(kind="final", content="parent"),
+            ModelDecision(kind="final", content="child"),
+        ]
+    )
+    agent = runtime(tmp_path, provider)
+    parent = agent.store.create_session()
+    parent_outcome = agent.run(parent.id, "计算 2+2")
+    checkpoint = next(
+        event.id
+        for event in agent.trace(parent.id)
+        if event.event_type is EventType.ASSISTANT_MESSAGE
+    )
+    child = agent.fork(parent.id, checkpoint or 0)
+    child_outcome = agent.run(child.id, "添加待办")
+    child_state = agent.replay(child.id)
+    assert child_state.tool_views[parent_outcome.turn_id].names == ("calculator",)
+    assert child_state.tool_views[child_outcome.turn_id].names == ("todo",)
